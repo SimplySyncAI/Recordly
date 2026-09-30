@@ -1,11 +1,10 @@
-import { buildMediaUrl, getMediaServerBaseUrl } from "../../mediaServer";
-import type { ProjectPreviewData } from "../../../src/types/projectPreview";
-import { hasFreshProjectThumbnail } from "./thumbnailFreshness";
 import { existsSync, constants as fsConstants, realpathSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { app } from "electron";
+import type { ProjectPreviewData } from "../../../src/types/projectPreview";
 import { RECORDINGS_DIR, USER_DATA_PATH } from "../../appPaths";
+import { buildMediaUrl, getMediaServerBaseUrl } from "../../mediaServer";
 import { isSupportedLocalMediaPath } from "../../mediaTypes";
 import {
 	LEGACY_PROJECT_FILE_EXTENSIONS,
@@ -16,6 +15,7 @@ import {
 	RECENT_PROJECTS_FILE,
 	RECORDINGS_SETTINGS_FILE,
 } from "../constants";
+import { createRecordingPreferencesStore } from "../settings/recordingPreferencesStore";
 import {
 	approvedLocalReadPaths,
 	currentProjectPath,
@@ -32,8 +32,11 @@ import {
 	normalizeVideoSourcePath,
 	parseJsonWithByteOrderMark,
 } from "../utils";
+import { hasFreshProjectThumbnail } from "./thumbnailFreshness";
 
 export { normalizePath, normalizeVideoSourcePath };
+
+const recordingPreferencesStore = createRecordingPreferencesStore(RECORDINGS_SETTINGS_FILE);
 
 export function getAssetRootPath() {
 	if (app.isPackaged) {
@@ -250,11 +253,7 @@ export async function getProjectsDir() {
 export async function persistRecordingsDirectorySetting(nextDir: string) {
 	setCustomRecordingsDir(path.resolve(nextDir));
 	setRecordingsDirLoaded(true);
-	await fs.writeFile(
-		RECORDINGS_SETTINGS_FILE,
-		JSON.stringify({ recordingsDir: path.resolve(nextDir) }, null, 2),
-		"utf-8",
-	);
+	await recordingPreferencesStore.update({ recordingsDir: path.resolve(nextDir) });
 }
 
 export function hasProjectFileExtension(filePath: string) {

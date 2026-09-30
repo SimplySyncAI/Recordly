@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import { parseJsonWithByteOrderMark } from "../utils";
 
 export interface RecordingPreferencesPatch {
@@ -7,14 +8,18 @@ export interface RecordingPreferencesPatch {
 	systemAudioEnabled?: boolean;
 	webcamEnabled?: boolean;
 	webcamDeviceId?: string;
+	recordingsDir?: string;
 }
 
+const operationQueues = new Map<string, Promise<void>>();
+
 export function createRecordingPreferencesStore(filePath: string) {
-	let operationQueue: Promise<void> = Promise.resolve();
+	const normalizedFilePath = path.resolve(filePath);
+	const getOperationQueue = () => operationQueues.get(normalizedFilePath) ?? Promise.resolve();
 
 	const readFile = async (): Promise<Record<string, unknown>> => {
 		try {
-			const content = await fs.readFile(filePath, "utf-8");
+			const content = await fs.readFile(normalizedFilePath, "utf-8");
 			const parsed = parseJsonWithByteOrderMark<unknown>(content);
 			return parsed && typeof parsed === "object" && !Array.isArray(parsed)
 				? (parsed as Record<string, unknown>)
@@ -26,19 +31,29 @@ export function createRecordingPreferencesStore(filePath: string) {
 
 	return {
 		async read(): Promise<Record<string, unknown>> {
-			await operationQueue;
+			await getOperationQueue();
 			return readFile();
 		},
 		async update(patch: RecordingPreferencesPatch): Promise<void> {
-			const operation = operationQueue.then(async () => {
+			const operation = getOperationQueue().then(async () => {
 				const existing = await readFile();
-				await fs.writeFile(
-					filePath,
-					JSON.stringify({ ...existing, ...patch }, null, 2),
-					"utf-8",
-				);
+				const temporaryPath = `${normalizedFilePath}.${process.pid}.${Date.now()}.tmp`;
+				try {
+					await fs.writeFile(
+						temporaryPath,
+						JSON.stringify({ ...existing, ...patch }, null, 2),
+						"utf-8",
+					);
+					await fs.rename(temporaryPath, normalizedFilePath);
+				} catch (error) {
+					await fs.rm(temporaryPath, { force: true }).catch(() => undefined);
+					throw error;
+				}
 			});
-			operationQueue = operation.catch(() => undefined);
+			operationQueues.set(
+				normalizedFilePath,
+				operation.catch(() => undefined),
+			);
 			await operation;
 		},
 	};

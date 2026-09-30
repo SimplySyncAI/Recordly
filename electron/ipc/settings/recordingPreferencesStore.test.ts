@@ -43,4 +43,22 @@ describe("recording preferences store", () => {
 			webcamDeviceId: "preferred-camera",
 		});
 	});
+
+	it("serializes concurrent folder and microphone updates from separate consumers", async () => {
+		const directory = await fs.mkdtemp(path.join(os.tmpdir(), "recordly-preferences-"));
+		temporaryDirectories.push(directory);
+		const filePath = path.join(directory, "recording.json");
+		const audioPreferences = createRecordingPreferencesStore(filePath);
+		const folderPreferences = createRecordingPreferencesStore(filePath);
+
+		await Promise.all([
+			audioPreferences.update({ microphoneDeviceId: "macbook-microphone" }),
+			folderPreferences.update({ recordingsDir: "/Users/dylan/Recordings" }),
+		]);
+
+		await expect(audioPreferences.read()).resolves.toEqual({
+			microphoneDeviceId: "macbook-microphone",
+			recordingsDir: "/Users/dylan/Recordings",
+		});
+	});
 });
