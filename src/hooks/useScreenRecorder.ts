@@ -8,6 +8,7 @@ import {
 	selectRecordingMimeType,
 	selectWebcamRecordingMimeType,
 } from "./recordingMimeType";
+import { decideRecordingPermission } from "./recordingPermissionDecision";
 
 const TARGET_FRAME_RATE = 60;
 const TARGET_WIDTH = 3840;
@@ -553,7 +554,12 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
 		}
 
 		const screenPermission = await window.electronAPI.getScreenRecordingPermissionStatus();
-		if (!screenPermission.success || screenPermission.status !== "granted") {
+		const screenPermissionDecision = decideRecordingPermission({
+			screenRecordingGranted: screenPermission.success && screenPermission.status === "granted",
+			accessibilityStatusAvailable: false,
+			accessibilityTrusted: false,
+		});
+		if (!screenPermissionDecision.allowed) {
 			await window.electronAPI.openScreenRecordingPreferences();
 			alert(
 				options.startup
@@ -563,28 +569,25 @@ export function useScreenRecorder(): UseScreenRecorderReturn {
 			return false;
 		}
 
-		const accessibilityPermission = await window.electronAPI.getAccessibilityPermissionStatus();
-		if (!accessibilityPermission.success) {
-			return false;
+		let accessibilityStatusAvailable = false;
+		let accessibilityTrusted = false;
+		try {
+			const accessibilityPermission =
+				await window.electronAPI.getAccessibilityPermissionStatus();
+			accessibilityStatusAvailable = accessibilityPermission.success;
+			accessibilityTrusted = accessibilityPermission.trusted;
+		} catch (error) {
+			console.warn("[permissions] Could not read Accessibility permission status:", error);
 		}
-
-		if (accessibilityPermission.trusted) {
-			return true;
+		const permissionDecision = decideRecordingPermission({
+			screenRecordingGranted: true,
+			accessibilityStatusAvailable,
+			accessibilityTrusted,
+		});
+		if (permissionDecision.diagnostic) {
+			console.warn(`[permissions] ${permissionDecision.diagnostic}`);
 		}
-
-		const requestedAccessibility = await window.electronAPI.requestAccessibilityPermission();
-		if (requestedAccessibility.success && requestedAccessibility.trusted) {
-			return true;
-		}
-
-		await window.electronAPI.openAccessibilityPreferences();
-		alert(
-			options.startup
-				? "Recordly also needs Accessibility permission for cursor tracking. System Settings has been opened. After enabling it, quit and reopen Recordly."
-				: "Accessibility permission is still missing. System Settings has been opened again. Enable it, then quit and reopen Recordly before recording.",
-		);
-
-		return false;
+		return true;
 	}, []);
 
 	const selectMimeType = useCallback(() => {
